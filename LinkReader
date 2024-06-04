@@ -1,0 +1,426 @@
+Full Project Code:
+
+These are the code for setting up each service (Backend - Spring Boot, Scala Library, Python FastAPI) and
+then the front-end (React website). And, lastly I will cover the deployment on Kubernetes using Helm
+charts.
+
+Step 1: Backend - Java Spring Boot
+
+1.1 Spring Boot Project Setup:
+
+Create a new Spring Boot project using Gradle.
+Configure it to call the Scala library.
+
+File: build.gradle
+gradle
+Code:
+
+plugins {
+ id 'org.springframework.boot' version '2.7.5'
+ id 'io.spring.dependency-management' version '1.0.13.RELEASE'
+ id 'java'
+}
+group = 'com.example'
+version = '0.0.1-SNAPSHOT'
+sourceCompatibility = '11'
+repositories {
+ mavenCentral()
+}
+dependencies {
+ implementation 'org.springframework.boot:spring-boot-starter-web'
+ implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+ implementation 'com.fasterxml.jackson.module:jackson-module-scala_2.13:2.13.0'
+ implementation 'org.postgresql:postgresql:42.3.1'
+ implementation 'com.example:scala-library:1.0.0' // Add the Scala library dependency
+ testImplementation 'org.springframework.boot:spring-boot-starter-test'
+}
+tasks.named('test') {
+ useJUnitPlatform()
+}
+
+1.2 Create a REST Controller:
+
+File: src/main/java/com/example/demo/controller/RequestController.java
+Java:
+Code:
+
+package com.example.demo.controller;
+import com.example.demo.service.ScalaService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.*;
+@RestController
+@RequestMapping("/api")
+public class RequestController {
+ @Autowired
+ private ScalaService scalaService;
+ @PostMapping("/process")
+ public String processRequest(@RequestBody String input) {
+ return scalaService.process(input);
+ }
+}
+
+1.3 Service to Call Scala Library:
+
+File: src/main/java/com/example/demo/service/ScalaService.java
+Java:
+Code:
+
+package com.example.demo.service;
+import com.example.scalalibrary.ScalaLibrary;
+import org.springframework.stereotype.Service;
+@Service
+public class ScalaService {
+ public String process(String input) {
+ return ScalaLibrary.process(input);
+ }
+}
+
+Step 2: Scala Library:
+
+2.1 Scala Library Setup:
+
+Create a Scala library project using Gradle.
+Add dependencies for PostgreSQL.
+File: build.gradle
+gradle
+Code:
+
+plugins {
+ id 'scala'
+ id 'java-library'
+}
+group = 'com.example'
+version = '1.0.0'
+repositories {
+ mavenCentral()
+}
+dependencies {
+ implementation 'org.scala-lang:scala-library:2.13.6'
+ implementation 'org.postgresql:postgresql:42.3.1'
+ implementation 'org.slick:slick_2.13:3.3.3'
+ implementation 'org.slick:slick-hikaricp_2.13:3.3.3'
+}
+sourceSets {
+ main {
+ scala {
+ srcDirs = ['src/main/scala']
+ }
+ }
+}
+
+2.2 Scala Code for Processing:
+
+File: src/main/scala/com/example/scalalibrary/ScalaLibrary.scala
+scala
+Code:
+
+package com.example.scalalibrary
+import slick.jdbc.PostgresProfile.api._
+import scala.concurrent.Await
+import scala.concurrent.duration.Duration
+object ScalaLibrary {
+ // Database configuration
+ val db = Database.forConfig("mydb")
+ // Table definition
+ class RequestHistory(tag: Tag) extends Table[(Int, String)](tag, "REQUEST_HISTORY") {
+ def id = column[Int]("ID", O.PrimaryKey, O.AutoInc)
+ def request = column[String]("REQUEST")
+ def * = (id, request)
+ }
+ val requestHistories = TableQuery[RequestHistory]
+ def process(input: String): String = {
+ val insertAction = DBIO.seq(
+ requestHistories.schema.createIfNotExists,
+ requestHistories += (0, input)
+ )
+
+ Await.result(db.run(insertAction), Duration.Inf)
+ s"Processed: $input"
+ }
+}
+
+2.3 application.conf for Database Configuration:
+
+File: src/main/resources/application.conf
+Conf:
+Code:
+
+mydb = {
+ url = "jdbc:postgresql://localhost:5432/mydatabase"
+ driver = "org.postgresql.Driver"
+ user = "myuser"
+ password = "mypassword"
+ connectionPool = "HikariCP"
+ keepAliveConnection = true
+}
+
+Step 3: Python FastAPI:
+
+3.1 FastAPI Project Setup:
+
+Create a new FastAPI project.
+File: main.py
+python
+Code:
+
+from fastapi import FastAPI
+import requests
+app = FastAPI()
+OPENAI_API_KEY = 'your-openai-api-key'
+OPENAI_ENDPOINT = 'https://api.openai.com/v1/engines/davinci-codex/completions'
+@app.post("/summarize")
+async def summarize(url: str):
+ # Fetch content from URL
+ response = requests.get(url)
+ content = response.text
+
+ # Call OpenAI API to summarize
+ headers = {
+ 'Content-Type': 'application/json',
+ 'Authorization': f'Bearer {OPENAI_API_KEY}',
+ }
+ data = {
+ 'prompt': f'Summarize the following content: {content}',
+ 'max_tokens': 150,
+ }
+ summary_response = requests.post(OPENAI_ENDPOINT, headers=headers, json=data)
+ summary = summary_response.json().get('choices')[0].get('text')
+
+ return {"summary": summary}
+
+Step 4: React Website:
+
+4.1 React Project Setup:
+
+Create a new React project.
+File: package.json
+json
+Code:
+
+{
+ "name": "website-crawler",
+ "version": "1.0.0",
+ "dependencies": {
+ "axios": "^0.24.0",
+ "react": "^17.0.2",
+ "react-dom": "^17.0.2",
+ "react-scripts": "4.0.3"
+ },
+ "scripts": {
+ "start": "react-scripts start",
+ "build": "react-scripts build",
+ "test": "react-scripts test",
+ "eject": "react-scripts eject"
+ }
+}
+
+4.2 React Code for Form and History Pages:
+
+File: src/App.js
+javascript
+Code:
+
+import React, { useState } from 'react';
+import axios from 'axios';
+function App() {
+ const [url, setUrl] = useState('');
+ const [summary, setSummary] = useState('');
+ const [history, setHistory] = useState([]);
+ const handleSubmit = async (e) => {
+ e.preventDefault();
+ const response = await axios.post('/summarize', { url });
+ setSummary(response.data.summary);
+ setHistory([...history, { url, summary: response.data.summary }]);
+ };
+ return (
+ <div>
+ <form onSubmit={handleSubmit}>
+ <input
+ type="text"
+ value={url}
+ onChange={(e) => setUrl(e.target.value)}
+ placeholder="Enter URL"
+ />
+ <button type="submit">Submit</button>
+ </form>
+ <div>
+ <h2>Summary</h2>
+ <p>{summary}</p>
+ </div>
+ <div>
+ <h2>History</h2>
+ <ul>
+ {history.map((item, index) => (
+ <li key={index}>{item.url} - {item.summary}</li>
+ ))}
+ </ul>
+ </div>
+ </div>
+ );
+}
+export default App;
+
+Step 5: Kubernetes Deployment using Helm:
+
+5.1 Helm Chart Structure:
+
+Create a Helm chart with necessary templates for deployment.
+File: Chart.yaml
+yaml:
+Code:
+
+apiVersion: v2
+name: my-project
+description: A Helm chart for deploying the full stack project
+version: 0.1.0
+File: values.yaml
+yaml:
+Code:
+springboot:
+ image: springboot-image
+ tag: latest
+scala:
+ image: scala-library-image
+ tag: latest
+fastapi:
+ image: fastapi-image
+ tag: latest
+react:
+ image: react-frontend-image
+ tag: latest
+postgres:
+ image: postgres:13
+ tag: latest
+ username: myuser
+ password: mypassword
+ database: mydatabase
+File: templates/deployment.yaml
+yaml:
+Code:
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+ name: {{ .Release.Name }}-springboot
+spec:
+ replicas: 1
+ selector:
+ matchLabels:
+ app: {{ .Release.Name }}-springboot
+ template:
+ metadata:
+ labels:
+ app: {{ .Release.Name }}-springboot
+ spec:
+ containers:
+ - name: springboot
+ image: "{{ .Values.springboot.image }}:{{ .Values.springboot.tag }}"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+ name: {{ .Release.Name }}-scala
+spec:
+ replicas: 1
+ selector:
+ matchLabels:
+ app: {{ .Release.Name }}-scala
+ template:
+ metadata:
+ labels:
+ app: {{ .Release.Name }}-scala
+ spec:
+ containers:
+ - name: scala
+ image: "{{ .Values.scala.image }}:{{ .Values.scala.tag }}"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+ name: {{ .Release.Name }}-fastapi
+spec:
+ replicas: 1
+ selector:
+ matchLabels:
+ app: {{ .Release.Name }}-fastapi
+ template:
+ metadata:
+ labels:
+ app: {{ .Release.Name }}-fastapi
+ spec:
+ containers:
+ - name: fastapi
+ image: "{{ .Values.fastapi.image }}:{{ .Values.fastapi.tag }}"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+ name: {{ .Release.Name }}-react
+spec:
+ replicas: 1
+ selector:
+ matchLabels:
+ app: {{ .Release.Name }}-react
+ template:
+ metadata:
+ labels:
+ app: {{ .Release.Name }}-react
+ spec:
+ containers:
+ - name: react
+ image: "{{ .Values.react.image }}:{{ .Values.react.tag }}"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+ name: {{ .Release.Name }}-postgres
+spec:
+ replicas: 1
+ selector:
+ matchLabels:
+ app: {{ .Release.Name }}-postgres
+ template:
+ metadata:
+ labels:
+ app: {{ .Release.Name }}-postgres
+ spec:
+ containers:
+ - name: postgres
+ image: "{{ .Values.postgres.image }}:{{ .Values.postgres.tag }}"
+ env:
+ - name: POSTGRES_USER
+ value: {{ .Values.postgres.username }}
+ - name: POSTGRES_PASSWORD
+ value: {{ .Values.postgres.password }}
+ - name: POSTGRES_DB
+ value: {{ .Values.postgres.database }}
+ ports:
+ - containerPort: 5432
+
+Step 6: Build and Deploy:
+
+6.1 Build Docker Images:
+
+Build Docker images for Spring Boot, Scala, FastAPI, and React projects.
+Push these images to a container registry (Docker Hub, AWS ECR, etc.).
+
+6.2 Deploy with Helm:
+
+Deploy the Helm chart to your Kubernetes cluster.
+Commands:
+bash:
+Code:
+
+# Build and push Docker images
+docker build -t your-repo/springboot-image:latest ./springboot
+docker build -t your-repo/scala-library-image:latest ./scala
+docker build -t your-repo/fastapi-image:latest ./fastapi
+docker build -t your-repo/react-frontend-image:latest ./react
+docker push your-repo/springboot-image:latest
+docker push your-repo/scala-library-image:latest
+docker push your-repo/fastapi-image:latest
+docker push your-repo/react-frontend-image:latest
+# Deploy using Helm
+helm install my-project ./helm-chart
+
+This will give you a complete setup for your full-stack project using Spring Boot, Scala, FastAPI,
+React, and Kubernetes. Adjust paths, names, and other specifics according to your project's needs.
